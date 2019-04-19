@@ -1,0 +1,299 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+		<title>reveal.js</title>
+
+		<link rel="stylesheet" href="css/reset.css">
+		<link rel="stylesheet" href="css/reveal.css">
+		<link rel="stylesheet" href="css/theme/black.css">
+
+		<!-- Theme used for syntax highlighting of code -->
+		<link rel="stylesheet" href="lib/css/monokai.css">
+
+		<!-- Printing and PDF exports -->
+		<script>
+			var link = document.createElement( 'link' );
+			link.rel = 'stylesheet';
+			link.type = 'text/css';
+			link.href = window.location.search.match( /print-pdf/gi ) ? 'css/print/pdf.css' : 'css/print/paper.css';
+			document.getElementsByTagName( 'head' )[0].appendChild( link );
+		</script>
+	</head>
+<body>
+<div class="reveal">
+<div class="slides">
+<section data-markdown>
+<textarea data-template>
+## SQLにトランスパイルできる自作言語を作ってる
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+## TL;DL
+これが
+```
+users << tasks ?> id == $1.assign_user_id
+:> name $1.title ?> $1.priority == "high"
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+## TL;DL
+こうなる
+```sql
+SELECT
+  name,
+  tasks.title
+FROM users
+LEFT JOIN tasks
+  ON (id) = (tasks.assign_user_id) WHERE (tasks.priority) = ('high')
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+## TL;DL
+こんな感じにトランスパイルされる
+```
+users << tasks
+~~~~~~~~~~~~~~ FROM句 ~ JOIN句 = "FROM users LEFT JOIN tasks"
+?> id == $1.assign_user_id
+~~~~~~~~~~~~~~~~~~~~~~~~~ ON句 = "ON id = tasks.assign_user_id"
+:> name $1.title
+~~~~~~~~~~~~~~~~ SELECT句 = "SELECT name, tasks.title"
+?> $1.priority == "high"
+~~~~~~~~~~~~~~~~~~~~~~~~ WHERE句 = "WHERE tasks.priority = 'high'"
+```
+SELECTクエリにのみ変換可能(readに特化)  
+</textarea>
+</section>
+
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+業務でデータの調査でなどでかんたんなSQLを発行することが多い
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+SQLは素晴らしい言語  
+SELECT句WHERE句など責務ごとに節が別れており  
+完成したクエリも自然言語に近く、読みやすい  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+だが調査のために発行する、短く、使い捨ての  
+クエリを書くにはいささか構文が冗長的…  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 例:
+userテーブルってどんなデータはいってたっけ…?sampleに10件ほどほしいな…
+```sql
+SELECT * FROM users LIMIT 10
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+```sql
+SELECT * FROM users LIMIT 10
+```
+クエリ発行者が本質的に指定したいのは
+"users" テーブルから "10件" 取得したい
+という条件のみ
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+つまりこれだけでいい
+```sql
+FROM users LIMIT 10
+```
+(どのカラムを取得するか、という条件は未指定ならば自動で定まればいい)
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+テーブル名から開始することを構文のルールとすれば "FROM" 識別子も不要じゃない？
+```sql
+users LIMIT 10
+```
+(ただし、言語としての拡張性は狭まる)
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+ついでに "LIMIT" って5回もタイプするのはしんどいので記号に変えよう
+```
+users @ 10
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 作った動機
+このような構文でSQLを作れる新しい言語があれば
+調査工数も短くなって素敵なのでは?
+```
+users @ 10
+```
+⇣⇣⇣⇣⇣
+```sql
+SELECT * FROM users LIMIT 10
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+アドホックなクエリと言えど、よく登場するコードスニペットがある  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+仮定: status が active で email_address を持つユーザをデフォルトの検索条件としておきたい  
+```
+users ?> status == "active" && email_address != null
+```
+毎回この検索条件をタイプするのは面倒  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+解決としてコードスニペットを生成する  
+「関数」機能を提供する  
+```
+users ?> $atvusr(0) && id == 3
+
+⇣⇣⇣⇣⇣
+
+users ?> (uses.status == "active" && users.email_address != null) && id == 3
+```
+* 関数は $ で始まるシンボルで呼び出すことができる
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+fetchしてきたデータを加工するものではなく  
+クエリtranspile前にクエリ自体を加工する関数  
+   = macro的なアプローチ  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+関数定義はクエリとは別にロードされるので  
+再利用性もある  
+定義には独自のミニ言語で記述する  
+```
+define {
+  defun atvusr(tbl_index: Number) => Expr {
+    let sts = $table_access(status, $tbl_index)
+    let eml = $table_access(status, $tbl_index)
+    q{ ($sts == "active" && $eml != null) }
+  }
+}
+```
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+提供している言語機能
+- 変数束縛  
+- 関数呼び出し(引数が0の場合は変数呼び出し)  
+- Generics  
+- queryリテラル( `q{...}` )  
+- closureリテラル  
+
+少ない!
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### 関数
+実装方針として  
+なるべく言語機能を少なくし、実装をシンプルに  
+他の言語で言語機能として搭載されているもの *1  
+はbuildin関数として実装している  
+*1: if,繰り返しなど  
+</textarea>
+</section>
+
+<section data-markdown>
+<textarea data-template>
+### その他
+Playgroundも提供しているので良かったら遊んでね  
+- Playground  
+https://keisunagawa.github.io/simql/#/
+- repository  
+https://github.com/keiSunagawa/SIMQL
+- Document  
+https://github.com/keiSunagawa/SIMQL/wiki
+
+ご清聴ありがとうございました。
+</textarea>
+</section>
+
+</div>
+</div>
+
+		<script src="js/reveal.js"></script>
+
+		<script>
+			// More info about config & dependencies:
+			// - https://github.com/hakimel/reveal.js#configuration
+			// - https://github.com/hakimel/reveal.js#dependencies
+			Reveal.initialize({
+				dependencies: [
+					{ src: 'plugin/markdown/marked.js' },
+					{ src: 'plugin/markdown/markdown.js' },
+					{ src: 'plugin/notes/notes.js', async: true },
+					{ src: 'plugin/highlight/highlight.js', async: true }
+				]
+			});
+		</script>
+	</body>
+</html>
